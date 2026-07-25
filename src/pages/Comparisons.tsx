@@ -236,6 +236,7 @@ function CausalSpecificitySection() {
   if (!data) return null
 
   const features = (data.features as CausalFeature[]) || []
+  if (features.length === 0) return null  // no activation-patching data for this atlas — hide the section
 
   // Sort by specificity ratio descending, take top 50
   const sorted = [...features]
@@ -328,8 +329,7 @@ export default function Comparisons() {
       <section className="space-y-2">
         <h1 className="text-3xl font-bold text-white">Comparisons</h1>
         <p className="text-gray-400">
-          SVD baseline comparisons, cross-layer feature persistence, and causal
-          specificity analysis for SAE features.
+          SVD baseline comparisons and cross-layer feature persistence for SAE features.
         </p>
       </section>
 

@@ -35,7 +35,7 @@ const KEY_FINDINGS = [
     tip: 'Browse all features at each transformer layer, visualized as a UMAP scatter plot.',
   },
   {
-    title: '141 Biological Modules',
+    title: 'Biological Modules',
     description: 'Co-activating feature clusters that map to coherent biological programs across cell types.',
     to: '/modules',
     accent: 'green',
@@ -244,7 +244,7 @@ export default function Overview() {
               className={`block bg-gray-900/50 rounded-xl border border-gray-800 p-5 ring-1 ${ACCENT_RING[card.accent]} transition-all hover:bg-gray-900/80`}
             >
               <h3 className={`font-semibold mb-2 flex items-center ${ACCENT_TEXT[card.accent]}`}>
-                {card.title}
+                {card.to === '/modules' ? `${data.total_modules} ${card.title}` : card.title}
                 <InfoIcon tip={card.tip} position="bottom" />
               </h3>
               <p className="text-sm text-gray-400 leading-relaxed">
