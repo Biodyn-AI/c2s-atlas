@@ -90,7 +90,7 @@ export default function About() {
           <p>Atlas websites in this project:</p>
           <ul className="list-disc list-inside space-y-1 text-sm">
             <li>
-              <a href="https://biodyn-ai.github.io/c2s-scale-atlas/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+              <a href="https://biodyn-ai.github.io/c2s-atlas/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
                 C2S-Scale-2B Atlas
               </a>
               <span className="text-gray-500"> (this atlas)</span>
