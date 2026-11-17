@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import Plot from 'react-plotly.js'
-import { useOntologyIndex } from '../hooks/useData'
+import { useOntologyIndex, useOntologyIndexCounts, useGlobalSummary } from '../hooks/useData'
 import { ontologyColor, ONTOLOGY_LABELS } from '../lib/colors'
 import { fmtPval } from '../lib/utils'
 import { InfoIcon } from '../components/Tooltip'
@@ -27,6 +27,8 @@ const PLOTLY_LAYOUT_BASE: any = {
 
 export default function OntologySearch() {
   const { data, loading, error } = useOntologyIndex()
+  const { data: completeCounts, error: countError } = useOntologyIndexCounts()
+  const { data: summary } = useGlobalSummary()
   const [query, setQuery] = useState('')
   const [selectedTerm, setSelectedTerm] = useState<string | null>(null)
   const isMobile = useIsMobile()
@@ -48,9 +50,10 @@ export default function OntologySearch() {
   const results = useMemo(() => {
     if (!selectedTerm || !data || !data[selectedTerm]) return null
     const entries = data[selectedTerm].slice().sort((a, b) => a.p - b.p)
-    const layers = new Set(entries.map(e => e.l))
-    return { entries, nLayers: layers.size }
-  }, [selectedTerm, data])
+    const counts = completeCounts?.[selectedTerm]
+    const layers = counts ? Object.keys(counts.by_layer) : [...new Set(entries.map(e => e.l))]
+    return { entries, nLayers: layers.length, total: counts?.total ?? entries.length, counts }
+  }, [selectedTerm, data, completeCounts])
 
   // Bar chart data: count per layer, colored by ontology source
   const barData = useMemo(() => {
@@ -64,7 +67,12 @@ export default function OntologySearch() {
       counts.set(e.l, (counts.get(e.l) || 0) + 1)
     }
 
-    const layers = [0, 1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 17]
+    const layers = summary?.layers.map(layer => layer.layer).sort((a, b) => a - b)
+      ?? [...new Set(results.entries.map(entry => entry.l))].sort((a, b) => a - b)
+    if (results.counts) {
+      const source = results.entries[0]?.o || 'none'
+      byOntology[source] = new Map(Object.entries(results.counts.by_layer).map(([layer, count]) => [Number(layer), count]))
+    }
     return Object.entries(byOntology).map(([ont, counts]) => ({
       x: layers,
       y: layers.map(l => counts.get(l) || 0),
@@ -73,7 +81,7 @@ export default function OntologySearch() {
       marker: { color: ontologyColor(ont) },
       hovertemplate: `%{x}: %{y} feature(s)<br>${ONTOLOGY_LABELS[ont] || ont}<extra></extra>`,
     }))
-  }, [results])
+  }, [results, summary])
 
   if (loading) {
     return (
@@ -83,11 +91,11 @@ export default function OntologySearch() {
     )
   }
 
-  if (error) {
+  if (error || countError) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-red-400 bg-red-900/20 border border-red-800 rounded-lg px-6 py-4">
-          Failed to load ontology index: {error}
+          Failed to load ontology index data: {error ?? countError}
         </div>
       </div>
     )
@@ -142,11 +150,18 @@ export default function OntologySearch() {
           {/* Summary */}
           <p className="text-gray-400 text-center">
             <span className="text-white font-semibold">{selectedTerm}</span> found in{' '}
-            <span className="text-green-400 font-semibold">{results.entries.length}</span>{' '}
-            feature{results.entries.length !== 1 ? 's' : ''} across{' '}
+            <span className="text-green-400 font-semibold">{results.total}</span>{' '}
+            feature{results.total !== 1 ? 's' : ''} across{' '}
             <span className="text-green-400 font-semibold">{results.nLayers}</span>{' '}
             layer{results.nLayers !== 1 ? 's' : ''}
           </p>
+
+          {results.total > results.entries.length && (
+            <p className="text-center text-xs text-gray-400">
+              Showing the {results.entries.length} matches with the smallest q-values.
+              The chart and total use all significant matches.
+            </p>
+          )}
 
           {/* Bar chart: features per layer */}
           <section className="bg-gray-900/50 rounded-xl border border-gray-800 p-6">
@@ -190,7 +205,7 @@ export default function OntologySearch() {
                   <tr className="text-left text-gray-500 border-b border-gray-800">
                     <th className="pb-2 pr-4">Layer</th>
                     <th className="pb-2 pr-4">Feature</th>
-                    <th className="pb-2 pr-4">p-value</th>
+                    <th className="pb-2 pr-4">q-value</th>
                     <th className="pb-2">Ontology</th>
                   </tr>
                 </thead>

@@ -2,6 +2,16 @@
 """Generate C2S-Scale-2B SAE atlas JSON for the geneformer-atlas React template.
 Reads runs/2b_atlas/*, writes atlas/public/data/*.json. Follows the build spec.
 Usable layers = catalog INTERSECT annotations, minus corrupt L08."""
+import argparse
+
+_legacy_parser = argparse.ArgumentParser(description="Archival pre-revision atlas generator; never use for v3 publication data")
+_legacy_parser.add_argument("--allow-legacy-scorer", action="store_true",
+                            help="Explicitly opt in to archival legacy generation at the hardcoded output path")
+if not _legacy_parser.parse_args().allow_legacy_scorer:
+    _legacy_parser.error("Archival legacy generator is disabled. Use export_revision_atlas.py "
+                         "--evaluation-dir RESULTS --run RUN --annotations ANNOTATIONS --out NEW_STAGING_DIR. "
+                         "Only archived legacy reproduction may use --allow-legacy-scorer.")
+
 import json, os, glob
 from collections import Counter, defaultdict
 import numpy as np

@@ -22,18 +22,18 @@ const PLOTLY_LAYOUT_BASE: any = {
   },
 }
 
-const PAIR_KEYS = ['L00_L07', 'L07_L16', 'L00_L16'] as const
-const PAIR_LABELS: Record<string, string> = {
-  L00_L07: 'L0 \u2192 L7',
-  L07_L16: 'L7 \u2192 L16',
-  L00_L16: 'L0 \u2192 L16',
-}
 
 export default function CrossLayerFlow() {
   const { data: graphData, loading: gLoading, error: gError } = useCrossLayerGraph()
   const { data: trackingData, loading: tLoading, error: tError } = useCrossLayerTracking()
-  const [selectedPair, setSelectedPair] = useState<string>(PAIR_KEYS[0])
+  const [selectedPair, setSelectedPair] = useState<string>('')
   const isMobile = useIsMobile()
+  const pairKeys = Object.keys(graphData ?? {}).sort((a, b) => {
+    const aa = a.match(/\d+/g)?.map(Number) ?? []
+    const bb = b.match(/\d+/g)?.map(Number) ?? []
+    return (aa[0] - bb[0]) || (aa[1] - bb[1])
+  })
+  const pairKey = pairKeys.includes(selectedPair) ? selectedPair : pairKeys[0]
 
   const loading = gLoading || tLoading
   const error = gError || tError
@@ -55,8 +55,8 @@ export default function CrossLayerFlow() {
 
   // Build top-20 dependencies for selected pair
   const topDeps = useMemo(() => {
-    if (!graphData || !graphData[selectedPair]) return []
-    const pair = graphData[selectedPair]
+    if (!graphData || !pairKey || !graphData[pairKey]) return []
+    const pair = graphData[pairKey]
     const rows: { a: number; b: number; pmi: number; lb: string }[] = []
     for (const entry of pair.deps) {
       if (!entry.deps || entry.deps.length === 0) continue
@@ -65,10 +65,10 @@ export default function CrossLayerFlow() {
     }
     rows.sort((a, b) => b.pmi - a.pmi)
     return rows.slice(0, 20)
-  }, [graphData, selectedPair])
+  }, [graphData, pairKey])
 
   // Summary stats for selected pair
-  const summary = graphData?.[selectedPair]?.summary
+  const summary = pairKey ? graphData?.[pairKey]?.summary : undefined
 
   if (loading) {
     return (
@@ -95,7 +95,7 @@ export default function CrossLayerFlow() {
       {/* Header */}
       <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-2">
         Cross-Layer Information Flow
-        <InfoIcon tip="How biological representations transform across the transformer's depth. Features are tracked by cosine similarity between adjacent layers." position="bottom" />
+        <InfoIcon tip="Decoder-direction similarity across layers and retained effects of source-feature ablations within the model." position="bottom" />
       </h1>
 
       {/* Persistence chart */}
@@ -103,7 +103,7 @@ export default function CrossLayerFlow() {
         <section className="bg-gray-900/50 rounded-xl border border-gray-800 p-6">
           <h2 className="text-lg font-semibold text-gray-200 mb-4 flex items-center">
             Feature Persistence Across Layer Transitions
-            <InfoIcon tip="Fraction of features at layer N that have a close match (cosine similarity > threshold) at layer N+1. Low persistence = the layer is transforming representations." />
+            <InfoIcon tip="Fraction of source decoder directions with a match above the saved cosine threshold in the next layer. Best matches can reuse target directions." />
           </h2>
           <Plot
             data={[
@@ -141,33 +141,27 @@ export default function CrossLayerFlow() {
 
       {/* Layer pair selector */}
       <section className="bg-gray-900/50 rounded-xl border border-gray-800 p-6 space-y-6">
-        <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-1 w-fit">
-          {PAIR_KEYS.map(pk => (
-            <button
-              key={pk}
-              onClick={() => setSelectedPair(pk)}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedPair === pk
-                  ? 'bg-purple-600 text-white'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'
-              }`}
-            >
-              {PAIR_LABELS[pk]}
-            </button>
-          ))}
-        </div>
+        <label className="flex items-center gap-3 text-sm text-gray-300">
+          Layer pair
+          <select value={pairKey ?? ''} onChange={event => setSelectedPair(event.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2">
+            {pairKeys.map(key => <option key={key} value={key}>
+              {key.split('_').map(part => `L${Number(part.slice(1))}`).join(' → ')}
+            </option>)}
+          </select>
+        </label>
 
         {/* Summary stats */}
         {summary && (
           <div className="flex flex-wrap gap-6">
-            {summary.n_features_with_deps != null && (
+            {(summary.n_sources ?? summary.n_features_with_deps) != null && (
               <div className="text-center">
                 <div className="text-xl font-bold text-white">
-                  {String(summary.n_features_with_deps)}
+                  {String(summary.n_sources ?? summary.n_features_with_deps)}
                 </div>
                 <div className="text-xs text-gray-500 uppercase tracking-wider flex items-center justify-center">
                   Connected Features
-                  <InfoIcon tip="Features in the source layer that have at least one significant ablation-effect dependency in the target layer." position="bottom" />
+                  <InfoIcon tip="Features in the source layer that have at least one retained ablation-effect dependency in the target layer." position="bottom" />
                 </div>
               </div>
             )}
@@ -196,11 +190,26 @@ export default function CrossLayerFlow() {
           </div>
         )}
 
+        {summary?.graph_is_capped === true && (
+          <p className="text-xs text-gray-400">
+            {summary.n_edges_stored != null && summary.n_display_edges != null ? <>
+              The saved graph contains {String(summary.n_edges_stored)} edges for this layer pair,
+              capped at {String(summary.stored_cap_per_source_target_layer ?? 50)} per source feature.
+              The browser data retains {String(summary.n_display_edges)} edges,
+              capped at {String(summary.display_cap_per_source_target_layer ?? 5)} per source feature.
+              The table shows the strongest retained edge per source, up to 20 rows.
+              Full measured edge counts may exceed the saved graph; omitted edges are unavailable here.
+            </> : <>
+              Counts describe the retained graph, which caps the number of effects saved per source feature and target layer.
+            </>}
+          </p>
+        )}
+
         {/* Top dependencies table */}
         <div>
           <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center">
-            Top 20 Dependencies by |Cohen's d|
-            <InfoIcon tip="The 20 strongest feature-to-feature connections between these layers, ranked by ablation effect (|Cohen's d|). Higher = stronger causal dependency." />
+            Top Dependencies by |Cohen's d|
+            <InfoIcon tip="The strongest retained connection per source feature, ranked by ablation effect (|Cohen's d|), with at most 20 rows." />
           </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

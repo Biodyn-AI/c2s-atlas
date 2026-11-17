@@ -13,6 +13,8 @@ export const ONTOLOGY_COLORS: Record<string, string> = {
   TRRUST_TF_enrichment: '#ef4444',
   TRRUST_edges: '#ef4444',
   TRRUST: '#ef4444',
+  TRRUST_pairs: '#f59e0b',
+  TF_membership: '#eab308',
   none: '#6b7280',
 }
 
@@ -24,7 +26,9 @@ export const ONTOLOGY_LABELS: Record<string, string> = {
   STRING: 'STRING PPI',
   TRRUST_TF_enrichment: 'TRRUST TF',
   TRRUST_edges: 'TRRUST Edge',
-  TRRUST: 'TRRUST',
+  TRRUST: 'TRRUST regulon',
+  TRRUST_pairs: 'TRRUST regulatory pairs',
+  TF_membership: 'Transcription-factor membership',
   none: 'Unannotated',
 }
 
@@ -38,7 +42,7 @@ export function ontologyColor(ont: string): string {
 }
 
 export function layerColor(layer: number): string {
-  const t = layer / 17
+  const t = Math.min(Math.max(layer / 25, 0), 1)
   const r = Math.round(30 + t * 180)
   const g = Math.round(100 - t * 40)
   const b = Math.round(220 - t * 140)

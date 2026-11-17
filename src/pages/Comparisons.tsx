@@ -70,7 +70,7 @@ function SvdVsSaeSection() {
   return (
     <section className="bg-gray-900/50 rounded-xl border border-gray-800 p-6 space-y-6">
       <SectionHeading>
-        <span className="flex items-center">SVD vs SAE Variance Explained<InfoIcon tip="Variance explained by PCA/SVD (gray) vs SAE (blue) at each layer. SAEs capture more variance because they use overcomplete, non-orthogonal bases." /></span>
+        <span className="flex items-center">SVD vs SAE Variance Explained<InfoIcon tip="Saved reconstruction measurements for leading SVD directions and the SAE at each layer. These representations use different numbers of directions, so this is not a capacity-matched comparison." /></span>
       </SectionHeading>
 
       <Plot
@@ -164,7 +164,7 @@ function FeaturePersistenceSection() {
   if (!ap || ap.length === 0) {
     return (
       <section className="bg-gray-900/50 rounded-xl border border-gray-800 p-6">
-        <SectionHeading><span className="flex items-center">Feature Persistence Across Layers<InfoIcon tip="Fraction of features at layer N that have a close match at layer N+1. Low persistence = the layer is transforming representations." /></span></SectionHeading>
+        <SectionHeading><span className="flex items-center">Feature Persistence Across Layers<InfoIcon tip="Fraction of source decoder directions with a cosine match above the saved threshold in the next layer. Targets may be reused." /></span></SectionHeading>
         <p className="text-gray-500">No adjacent persistence data available.</p>
       </section>
     )
@@ -179,7 +179,7 @@ function FeaturePersistenceSection() {
 
   return (
     <section className="bg-gray-900/50 rounded-xl border border-gray-800 p-6 space-y-4">
-      <SectionHeading><span className="flex items-center">Feature Persistence Across Layers<InfoIcon tip="Fraction of features at layer N that have a close match at layer N+1. Low persistence = the layer is transforming representations." /></span></SectionHeading>
+      <SectionHeading><span className="flex items-center">Feature Persistence Across Layers<InfoIcon tip="Fraction of source decoder directions with a cosine match above the saved threshold in the next layer. Targets may be reused." /></span></SectionHeading>
 
       <Plot
         data={[
@@ -216,8 +216,8 @@ function FeaturePersistenceSection() {
 
       <p className="text-sm text-gray-500 leading-relaxed">
         Persistence rate measures the fraction of features in layer N that have a
-        close cosine-similarity match in layer N+1. Low persistence indicates
-        representational transformation between layers.
+        decoder cosine-similarity match above the saved threshold in layer N+1.
+        Best matches can reuse target directions; this is not a one-to-one survival count.
       </p>
     </section>
   )
@@ -273,7 +273,7 @@ function CausalSpecificitySection() {
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: '#6b7280' }} />
           {'< 2x specificity'}
-          <InfoIcon tip="Features with <2x specificity — they affect many genes similarly (polysemantic)." position="bottom" />
+          <InfoIcon tip="A target-to-other logit-effect ratio below two in the saved patching assay." position="bottom" />
         </span>
       </div>
 
@@ -311,9 +311,8 @@ function CausalSpecificitySection() {
       />
 
       <p className="text-sm text-gray-500 leading-relaxed">
-        Specificity ratio measures how selectively a feature&apos;s causal patch
-        affects its target gene logit versus off-target genes. Higher values
-        indicate more precise, monosemantic causal roles.
+        Specificity ratio compares the model logit effect on selected target genes with other genes.
+        The ratio describes this patching assay; it does not establish a biological regulatory effect.
       </p>
     </section>
   )

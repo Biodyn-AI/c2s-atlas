@@ -2,6 +2,16 @@
 """Shrink the large atlas index/annotation files to sane sizes for GitHub Pages (pitfall #1).
 Regenerates gene_index.json, ontology_index.json, and per-layer annotations from source with caps.
 Positions/features/other singletons are untouched (no UMAP re-run)."""
+import argparse
+
+_legacy_parser = argparse.ArgumentParser(description="Archival pre-revision atlas compactor; never use for v3 publication data")
+_legacy_parser.add_argument("--allow-legacy-scorer", action="store_true",
+                            help="Explicitly opt in to archival legacy generation at the hardcoded output path")
+if not _legacy_parser.parse_args().allow_legacy_scorer:
+    _legacy_parser.error("Archival legacy generator is disabled. Use export_revision_atlas.py "
+                         "--evaluation-dir RESULTS --run RUN --annotations ANNOTATIONS --out NEW_STAGING_DIR. "
+                         "Only archived legacy reproduction may use --allow-legacy-scorer.")
+
 import json, glob, os
 from collections import defaultdict
 

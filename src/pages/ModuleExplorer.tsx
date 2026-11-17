@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { useModules } from '../hooks/useData'
+import { useModules, useGlobalSummary } from '../hooks/useData'
 import { moduleColor } from '../lib/colors'
 import { InfoIcon } from '../components/Tooltip'
 
@@ -8,6 +8,7 @@ type SortKey = 'size' | 'layer'
 
 export default function ModuleExplorer() {
   const { data, loading, error } = useModules()
+  const { data: summary } = useGlobalSummary()
   const [layerFilter, setLayerFilter] = useState<number | 'all'>('all')
   const [sortBy, setSortBy] = useState<SortKey>('layer')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -44,13 +45,15 @@ export default function ModuleExplorer() {
   }
 
   if (!data) return null
+  const layers = (summary?.layers.map(layer => layer.layer)
+    ?? [...new Set(data.map(module => module.layer))]).sort((a, b) => a - b)
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
       {/* Header */}
       <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-2">
-        {data.length} Biological Modules across Layers 0-7
-        <InfoIcon tip="Biological modules are groups of features that co-activate on the same cells, identified by Leiden community detection." position="bottom" />
+        {data.length} Co-activation Modules across {layers.length} Layers
+        <InfoIcon tip="Biological modules are groups of features that co-activate at the same gene-token positions, identified by Leiden community detection." position="bottom" />
       </h1>
 
       {/* Filter row */}
@@ -66,7 +69,7 @@ export default function ModuleExplorer() {
             className="bg-gray-800 border border-gray-700 rounded-md px-3 py-1.5 text-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="all">All</option>
-            {[0, 1, 2, 3, 4, 5, 6, 7].map(i => (
+            {layers.map(i => (
               <option key={i} value={i}>
                 Layer {i}
               </option>

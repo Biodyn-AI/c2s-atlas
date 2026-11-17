@@ -1,37 +1,32 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
+import { createDataClient } from '../lib/dataTransport'
 import type {
-  GlobalSummary, FeatureCompact, FeatureAnnotations,
+  GlobalSummary, FeatureCompact,
   Module, CausalFeature, PerturbationTarget,
   GeneIndexEntry, OntologyIndexEntry, CrossLayerPair,
-  CellTypeData,
+  CellTypeData, OntologyIndexCounts, GeneIndexCounts,
 } from '../lib/types'
 
 const BASE = import.meta.env.BASE_URL + 'data/'
-const cache = new Map<string, unknown>()
+const client = createDataClient(BASE)
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const key = path
-  if (cache.has(key)) return cache.get(key) as T
-  const res = await fetch(BASE + path)
-  if (!res.ok) throw new Error(`Failed to load ${path}: ${res.status}`)
-  const data = await res.json()
-  cache.set(key, data)
-  return data as T
+  return client.getJson<T>(path)
 }
 
 function useAsync<T>(loader: () => Promise<T>, deps: unknown[]): { data: T | null; loading: boolean; error: string | null } {
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const mounted = useRef(true)
   useEffect(() => {
-    mounted.current = true
+    let cancelled = false
+    setData(null)
     setLoading(true)
     setError(null)
     loader()
-      .then(d => { if (mounted.current) { setData(d); setLoading(false) } })
-      .catch(e => { if (mounted.current) { setError(e.message); setLoading(false) } })
-    return () => { mounted.current = false }
+      .then(d => { if (!cancelled) { setData(d); setLoading(false) } })
+      .catch(e => { if (!cancelled) { setError(e.message); setLoading(false) } })
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
   return { data, loading, error }
@@ -55,10 +50,10 @@ export function useLayerPositions(layer: number) {
   )
 }
 
-export function useLayerAnnotations(layer: number) {
+export function useFeatureAnnotations(layer: number, feature: number) {
   return useAsync(
-    () => fetchJson<Record<string, FeatureAnnotations>>(`layer_${String(layer).padStart(2, '0')}_annotations.json`),
-    [layer]
+    () => client.getFeatureAnnotations(layer, feature),
+    [layer, feature]
   )
 }
 
@@ -94,21 +89,26 @@ export function useGeneIndex() {
   return useAsync(() => fetchJson<Record<string, GeneIndexEntry[]>>('gene_index.json'), [])
 }
 
+export function useGeneIndexCounts() {
+  return useAsync(() => client.getOptionalJson<Record<string, GeneIndexCounts>>('gene_index_counts.json'), [])
+}
+
 export function useOntologyIndex() {
   return useAsync(() => fetchJson<Record<string, OntologyIndexEntry[]>>('ontology_index.json'), [])
+}
+
+export function useOntologyIndexCounts() {
+  // Older atlas bundles have no count file; their displayed index remains usable.
+  return useAsync(() => client.getOptionalJson<Record<string, OntologyIndexCounts>>('ontology_index_counts.json'), [])
 }
 
 export function useLayerCellTypes(layer: number) {
   return useAsync(
     async () => {
-      if (layer < 0 || layer > 17) return null
-      try {
-        return await fetchJson<CellTypeData>(
+      if (layer < 0) return null
+      return await client.getOptionalJson<CellTypeData>(
           `layer_${String(layer).padStart(2, '0')}_celltypes.json`
         )
-      } catch {
-        return null
-      }
     },
     [layer]
   )

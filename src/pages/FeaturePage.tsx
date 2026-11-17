@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import Plot from 'react-plotly.js'
-import { useLayerFeatures, useLayerAnnotations, useCausalPatching, usePerturbationResponse, useLayerCellTypes } from '../hooks/useData'
+import { useLayerFeatures, useFeatureAnnotations, useCausalPatching, usePerturbationResponse, useLayerCellTypes } from '../hooks/useData'
 import { moduleColor, ontologyColor, ONTOLOGY_LABELS, tissueColor } from '../lib/colors'
 import { fmtPval, fmtK } from '../lib/utils'
 import { InfoIcon } from '../components/Tooltip'
-import type { FeatureCompact, FeatureAnnotations, AnnotationEntry, CausalFeature, PerturbationTarget, FeatureCellTypes } from '../lib/types'
+import type { FeatureCompact, AnnotationEntry, NetworkEvidence, CausalFeature, PerturbationTarget, FeatureCellTypes } from '../lib/types'
 
-const ONTOLOGY_ORDER = ['GO_BP', 'KEGG', 'Reactome', 'STRING_edges', 'TRRUST_TF_enrichment', 'TRRUST_edges']
+const ONTOLOGY_ORDER = ['GO_BP', 'KEGG', 'Reactome', 'TRRUST']
+const NETWORK_RECORDS = ['STRING', 'STRING_edges', 'TRRUST_edges', 'TRRUST_TF_enrichment', 'TRRUST_pairs', 'TF_membership']
 
 export default function FeaturePage() {
   const { layerId, featureId } = useParams<{ layerId: string; featureId: string }>()
@@ -15,25 +16,22 @@ export default function FeaturePage() {
   const idx = Number(featureId ?? 0)
 
   const { data: features, loading: featLoading, error: featError } = useLayerFeatures(layer)
-  const { data: annotations, loading: annLoading } = useLayerAnnotations(layer)
-  const { data: causalData } = useCausalPatching()
-  const { data: pertData } = usePerturbationResponse()
-  const { data: cellTypeData } = useLayerCellTypes(layer)
+  const { data: fullAnnotations, loading: annLoading, error: annError } = useFeatureAnnotations(layer, idx)
+  const { data: causalData, error: causalError } = useCausalPatching()
+  const { data: pertData, error: pertError } = usePerturbationResponse()
+  const { data: cellTypeData, error: cellTypeError } = useLayerCellTypes(layer)
+  const causalLayer = typeof causalData?.summary.layer === 'number' ? causalData.summary.layer : null
+  const perturbationLayer = typeof pertData?.summary.layer === 'number' ? pertData.summary.layer : null
 
   const feature: FeatureCompact | null = useMemo(() => {
     if (!features) return null
     return features.find(f => f.i === idx) ?? null
   }, [features, idx])
 
-  const fullAnnotations: FeatureAnnotations | null = useMemo(() => {
-    if (!annotations) return null
-    return annotations[String(idx)] ?? null
-  }, [annotations, idx])
-
   const causalFeature: CausalFeature | null = useMemo(() => {
-    if (layer !== 16 || !causalData) return null
+    if (layer !== causalLayer || !causalData) return null
     return causalData.features.find(f => f.i === idx) ?? null
-  }, [layer, causalData, idx])
+  }, [layer, causalLayer, causalData, idx])
 
   const featureCellTypes: FeatureCellTypes | null = useMemo(() => {
     if (!cellTypeData) return null
@@ -41,7 +39,7 @@ export default function FeaturePage() {
   }, [cellTypeData, idx])
 
   const matchingPertTargets: { target: PerturbationTarget; es: number; lb: string }[] = useMemo(() => {
-    if (layer !== 16 || !pertData) return []
+    if (layer !== perturbationLayer || !pertData) return []
     const matches: { target: PerturbationTarget; es: number; lb: string }[] = []
     for (const t of pertData.targets) {
       const hit = t.top.find(entry => entry.i === idx)
@@ -50,9 +48,13 @@ export default function FeaturePage() {
       }
     }
     return matches
-  }, [layer, pertData, idx])
+  }, [layer, perturbationLayer, pertData, idx])
 
   const loading = featLoading || annLoading
+  const ontologyAnnotations = fullAnnotations?.anns.filter(entry => !NETWORK_RECORDS.includes(entry.o)) ?? []
+  const networkEvidence = fullAnnotations?.network_evidence ?? fullAnnotations?.anns
+    .filter(entry => NETWORK_RECORDS.includes(entry.o))
+    .map(entry => ({ source: entry.o, term: entry.t, q: entry.p < 1 ? entry.p : undefined, k: entry.n })) ?? []
 
   if (loading) {
     return (
@@ -62,10 +64,10 @@ export default function FeaturePage() {
     )
   }
 
-  if (featError) {
+  if (featError || annError) {
     return (
       <div className="max-w-5xl mx-auto p-6">
-        <div className="text-red-400">{featError}</div>
+        <div className="text-red-400">{featError ?? annError}</div>
       </div>
     )
   }
@@ -100,7 +102,7 @@ export default function FeaturePage() {
         {feature.lb ? (
           <p className="text-lg text-blue-300 mt-1">{feature.lb}</p>
         ) : (
-          <p className="text-lg text-gray-500 italic mt-1">Unannotated feature</p>
+          <p className="text-lg text-gray-500 italic mt-1">No ontology / regulon annotation</p>
         )}
       </div>
 
@@ -113,23 +115,35 @@ export default function FeaturePage() {
       )}
 
       {/* Annotations by Ontology */}
-      {fullAnnotations && fullAnnotations.anns.length > 0 && (
-        <AnnotationsSection annotations={fullAnnotations.anns} />
+      {ontologyAnnotations.length > 0 && (
+        <AnnotationsSection annotations={ontologyAnnotations} />
       )}
+      {networkEvidence.length > 0 && <NetworkEvidenceSection evidence={networkEvidence} />}
+
+      {/* Declared supporting resources must not disappear silently on transport failure. */}
+      {[
+        ['Cell-type enrichment', cellTypeError],
+        ['Causal patching', causalError],
+        ['Perturbation response', pertError],
+      ].filter(([, error]) => error).map(([label, error]) => (
+        <div key={label} role="alert" className="text-red-400 text-sm border border-red-900 rounded-lg p-3">
+          {label} could not be loaded: {error}
+        </div>
+      ))}
 
       {/* Cell Type & Tissue Enrichment (all layers) */}
       {featureCellTypes && (featureCellTypes.ct.length > 0 || featureCellTypes.ti.length > 0) && (
-        <CellTypeEnrichmentSection data={featureCellTypes} />
+        <CellTypeEnrichmentSection data={featureCellTypes} nCells={cellTypeData?.summary.n_cells} source={cellTypeData?.summary.source} />
       )}
 
-      {/* Causal Patching (L16 only) */}
+      {/* Causal patching at the layer identified in the loaded metadata. */}
       {causalFeature && (
-        <CausalPatchingSection causal={causalFeature} />
+        <CausalPatchingSection causal={causalFeature} layer={layer} />
       )}
 
-      {/* Perturbation Response (L16 only) */}
+      {/* Perturbation response at the layer identified in the loaded metadata. */}
       {matchingPertTargets.length > 0 && (
-        <PerturbationSection matches={matchingPertTargets} featureIdx={idx} />
+        <PerturbationSection matches={matchingPertTargets} featureIdx={idx} layer={layer} />
       )}
     </div>
   )
@@ -143,17 +157,17 @@ function MetadataGrid({ feature }: { feature: FeatureCompact; layer?: number }) 
     {
       label: 'Activation Freq',
       value: <span className="font-mono">{f.f.toFixed(4)}</span>,
-      tip: 'Fraction of input cells where this feature activates. Lower values indicate more selective features.',
+      tip: 'Fraction of gene-token positions with positive activation for this feature.',
     },
     {
       label: 'Mean Activation',
       value: <span className="font-mono">{f.ma.toFixed(3)}</span>,
-      tip: 'Average activation magnitude when the feature fires. Higher = stronger signal.',
+      tip: 'Mean activation across the atlas gene-token positions.',
     },
     {
       label: 'Fire Count',
       value: <span className="font-mono">{fmtK(f.fc)}</span>,
-      tip: 'Total cells where this feature had nonzero activation.',
+      tip: 'Number of gene-token positions with nonzero activation.',
     },
     {
       label: 'Module',
@@ -168,10 +182,10 @@ function MetadataGrid({ feature }: { feature: FeatureCompact; layer?: number }) 
       ) : (
         <span className="text-gray-500 italic">Unassigned</span>
       ),
-      tip: 'Co-activation cluster this feature belongs to. Features in the same module tend to fire on the same cells.',
+      tip: 'Co-activation cluster this feature belongs to. Features in the same module tend to fire at the same gene-token positions.',
     },
     {
-      label: 'Annotations',
+      label: f.annotated_any != null ? 'Ontology / regulon terms' : 'Annotation records',
       value: <span className="font-mono">{f.na}</span>,
       tip: 'Number of significant ontology enrichments for this feature\'s top genes.',
     },
@@ -180,11 +194,13 @@ function MetadataGrid({ feature }: { feature: FeatureCompact; layer?: number }) 
       value: f.sv ? (
         <span className="text-amber-400">SVD-aligned</span>
       ) : (
-        <span className="text-blue-400">Novel (non-SVD)</span>
+        <span className="text-blue-400">Not SVD-aligned</span>
       ),
-      tip: "'Novel' means this direction was not captured by PCA/SVD \u2014 the SAE learned something new.",
+      tip: 'Decoder alignment with the leading SVD directions. Lack of alignment alone does not establish a new biological concept.',
     },
   ]
+  if (f.ne != null) cells.push({ label: 'Network tests', value: f.ne,
+    tip: 'Significant network-pair or transcription-factor-membership tests, counted separately from ontology terms.' })
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -206,8 +222,8 @@ function TopGenesChart({ genes }: { genes: { n: string; a: number; fc: number }[
   return (
     <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
       <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-1 flex items-center">
-        Gene Effects
-        <InfoIcon tip="Genes most strongly associated with this feature. The activation value shows how much each gene contributes when the feature fires." />
+        Top-associated Genes
+        <InfoIcon tip="Genes with the largest mean feature activation when the feature fires on their gene-token positions. This association is not a causal gene effect." />
       </h2>
       <p className="text-xs text-gray-600 mb-3">
         Top genes by mean activation — higher values indicate stronger feature association with that gene's expression.
@@ -285,8 +301,8 @@ function AnnotationsSection({ annotations }: { annotations: AnnotationEntry[] })
   return (
     <div className="space-y-3">
       <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider flex items-center">
-        Annotations
-        <InfoIcon tip="Biological pathway and process enrichments from five ontology databases. Lower p-values indicate stronger enrichment." />
+        Ontology and Regulon Terms
+        <InfoIcon tip="Pathway, biological-process and curated regulon enrichment. q is the BH-adjusted p-value. Network-pair and TF-membership tests are shown separately." />
       </h2>
       {orderedKeys.map(ontKey => (
         <OntologyGroup
@@ -332,10 +348,10 @@ function OntologyGroup({ ontology, entries }: { ontology: string; entries: Annot
                 <span className="text-gray-200 flex-1">{entry.t}</span>
                 <div className="flex items-center gap-3 flex-shrink-0 text-xs">
                   <span className="text-gray-500">
-                    p={fmtPval(entry.p)}
+                    q={fmtPval(entry.q ?? entry.p)}
                   </span>
                   <span className="text-gray-500">
-                    OR={entry.or.toFixed(1)}
+                    {entry.effect_kind === 'fold_enrichment' ? 'Fold' : 'OR'}={(entry.fold ?? entry.or).toFixed(1)}
                   </span>
                 </div>
               </div>
@@ -353,7 +369,32 @@ function OntologyGroup({ ontology, entries }: { ontology: string; entries: Annot
   )
 }
 
-function CausalPatchingSection({ causal }: { causal: CausalFeature }) {
+function NetworkEvidenceSection({ evidence }: { evidence: NetworkEvidence[] }) {
+  return (
+    <section className="bg-gray-900 rounded-lg border border-gray-800 p-4 space-y-3">
+      <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Network Evidence</h2>
+      <p className="text-xs text-gray-400">
+        Pair-count and factor-membership tests are distinct from named ontology terms.
+        Passing the same network test does not imply that two features share a biological function.
+      </p>
+      {evidence.map(entry => (
+        <div key={`${entry.source}:${entry.term}`} className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-800 pt-3 text-sm">
+          <div>
+            <span style={{ color: ontologyColor(entry.source) }}>{ONTOLOGY_LABELS[entry.source] || entry.source}</span>
+            <div className="text-xs text-gray-500">{entry.term}</div>
+          </div>
+          <div className="text-xs text-gray-400 space-x-3">
+            {entry.q != null ? <span>q={fmtPval(entry.q)}</span> : <span>No significance test recorded</span>}
+            {entry.k != null && <span>Observed: {entry.k}</span>}
+            {entry.expected != null && <span>Expected: {entry.expected.toFixed(2)}</span>}
+          </div>
+        </div>
+      ))}
+    </section>
+  )
+}
+
+function CausalPatchingSection({ causal, layer }: { causal: CausalFeature; layer: number }) {
   const maxAbs = Math.max(Math.abs(causal.td), Math.abs(causal.od), 0.01)
 
   return (
@@ -361,7 +402,7 @@ function CausalPatchingSection({ causal }: { causal: CausalFeature }) {
       <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-1 flex items-center">
         Logit Effects (Causal Patching)
         <InfoIcon tip="Activation patching: measuring how much ablating this single gene-token feature changes the model's next-gene predictions." />
-        <span className="text-xs text-gray-500 font-normal ml-2">Layer 16</span>
+        <span className="text-xs text-gray-500 font-normal ml-2">Layer {layer}</span>
       </h2>
       <p className="text-xs text-gray-600 mb-4">
         Measured change in gene prediction logits when this feature is activation-patched.
@@ -386,16 +427,16 @@ function CausalPatchingSection({ causal }: { causal: CausalFeature }) {
       {/* Stats row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-gray-800/30 rounded-lg p-3">
         <div>
-          <div className="text-xs text-gray-500 mb-1 flex items-center">Specificity Ratio<InfoIcon tip="Ratio of effect on target genes vs. off-target genes. Higher = more specific causal role. >2x is considered specific." position="bottom" /></div>
+          <div className="text-xs text-gray-500 mb-1 flex items-center">Specificity Ratio<InfoIcon tip="Ratio of model logit effects on selected target genes versus other genes; this is a descriptive ratio, not a significance test." position="bottom" /></div>
           <div className={`text-lg font-mono ${causal.sr > 2 ? 'text-green-400' : causal.sr > 1 ? 'text-yellow-400' : 'text-gray-300'}`}>
             {causal.sr.toFixed(2)}
           </div>
           <div className="text-xs text-gray-600">
-            {causal.sr > 2 ? 'Specific' : causal.sr > 1 ? 'Moderate' : 'Non-specific'}
+            {causal.sr > 2 ? 'Ratio > 2' : causal.sr > 1 ? 'Ratio > 1' : 'Ratio ≤ 1'}
           </div>
         </div>
         <div>
-          <div className="text-xs text-gray-500 mb-1 flex items-center">Target Logit Diff<InfoIcon tip="Change in predicted probability of the target gene when this feature is patched out." position="bottom" /></div>
+          <div className="text-xs text-gray-500 mb-1 flex items-center">Target Logit Diff<InfoIcon tip="Change in the model logit for selected target genes when this feature is patched out." position="bottom" /></div>
           <div className={`text-lg font-mono ${causal.td < 0 ? 'text-red-400' : 'text-green-400'}`}>
             {causal.td > 0 ? '+' : ''}{causal.td.toFixed(3)}
           </div>
@@ -472,16 +513,18 @@ function LogitBar({
 function PerturbationSection({
   matches,
   featureIdx,
+  layer,
 }: {
   matches: { target: PerturbationTarget; es: number; lb: string }[]
   featureIdx: number
+  layer: number
 }) {
   return (
     <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
       <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3 flex items-center">
         Perturbation Response
         <InfoIcon tip="How this feature responds to gene knockdowns from the Replogle K562 CRISPRi dataset. ES = effect size." />
-        <span className="text-xs text-gray-500 font-normal ml-2">(Layer 16)</span>
+        <span className="text-xs text-gray-500 font-normal ml-2">(Layer {layer})</span>
       </h2>
       <p className="text-xs text-gray-500 mb-3">
         Feature F{featureIdx} appears in the top-responding features for the following perturbation targets:
@@ -508,7 +551,7 @@ function PerturbationSection({
                 ES={es.toFixed(3)}
               </div>
               <div className="text-xs text-gray-600">
-                {fmtK(target.nk)} KD / {fmtK(target.nr)} resp
+                {target.n_cells != null ? `${fmtK(target.n_cells)} cells / ` : ''}{fmtK(target.nr)} responding features
               </div>
             </div>
           </div>
@@ -518,7 +561,7 @@ function PerturbationSection({
   )
 }
 
-function CellTypeEnrichmentSection({ data }: { data: FeatureCellTypes }) {
+function CellTypeEnrichmentSection({ data, nCells, source }: { data: FeatureCellTypes; nCells?: number; source?: string }) {
   const [showAll, setShowAll] = useState(false)
   const visibleCt = showAll ? data.ct : data.ct.slice(0, 5)
   const maxOr = Math.max(...data.ct.map(c => c.or), 1)
@@ -528,11 +571,11 @@ function CellTypeEnrichmentSection({ data }: { data: FeatureCellTypes }) {
       <div>
         <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-1 flex items-center">
           Cell Type & Tissue Enrichment
-          <InfoIcon tip="Which cell types and tissues show the strongest activation of this feature (using Tabula Sapiens multi-tissue data)." />
-          <span className="text-xs text-gray-500 font-normal ml-2">Tabula Sapiens (3,000 cells)</span>
+          <InfoIcon tip="Cell-type and tissue association records from the loaded reference dataset." />
+          <span className="text-xs text-gray-500 font-normal ml-2">{source ?? 'Reference cohort'}{nCells != null && ` (${fmtK(nCells)} cells)`}</span>
         </h2>
         <p className="text-xs text-gray-600">
-          Enrichment of cell types and tissues among the top 10% activating cells for this feature.
+          Cell-type and tissue associations recorded for this feature in the reference dataset.
         </p>
       </div>
 
@@ -563,7 +606,7 @@ function CellTypeEnrichmentSection({ data }: { data: FeatureCellTypes }) {
                         {match.or.toFixed(1)}x
                       </div>
                       <div className="text-[10px] text-gray-500 truncate leading-tight mt-0.5">
-                        p={fmtPval(match.p)}
+                        q={fmtPval(match.p)}
                       </div>
                     </>
                   ) : (
@@ -606,7 +649,7 @@ function CellTypeEnrichmentSection({ data }: { data: FeatureCellTypes }) {
                     {ct.or.toFixed(1)}x
                   </span>
                   <span className="text-xs text-gray-500 flex-shrink-0">
-                    p={fmtPval(ct.p)}
+                    q={fmtPval(ct.p)}
                   </span>
                 </div>
               </div>

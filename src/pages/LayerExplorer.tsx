@@ -8,9 +8,8 @@ import { InfoIcon } from '../components/Tooltip'
 import { useIsMobile } from '../hooks/useIsMobile'
 import type { FeatureCompact } from '../lib/types'
 
-type ColorBy = 'Module' | 'Annotations' | 'Activation Freq' | 'Ontology' | 'SVD Alignment'
-const COLOR_OPTIONS: ColorBy[] = ['Module', 'Annotations', 'Activation Freq', 'Ontology', 'SVD Alignment']
-const LAYERS = [0, 1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 17]
+type ColorBy = 'Module' | 'Annotations' | 'Network Evidence' | 'Activation Freq' | 'Ontology' | 'SVD Alignment'
+const COLOR_OPTIONS: ColorBy[] = ['Module', 'Annotations', 'Network Evidence', 'Activation Freq', 'Ontology', 'SVD Alignment']
 
 function getColor(f: FeatureCompact, colorBy: ColorBy): string {
   switch (colorBy) {
@@ -18,6 +17,8 @@ function getColor(f: FeatureCompact, colorBy: ColorBy): string {
       return moduleColor(f.m)
     case 'Annotations':
       return richColor(f.na)
+    case 'Network Evidence':
+      return richColor(f.ne ?? 0)
     case 'Activation Freq':
       return freqColor(f.f)
     case 'Ontology':
@@ -36,6 +37,7 @@ export default function LayerExplorer() {
   const { data: features, loading: featLoading, error: featError } = useLayerFeatures(layer)
   const { data: positions, loading: posLoading } = useLayerPositions(layer)
   const { data: globalSummary } = useGlobalSummary()
+  const layers = globalSummary?.layers.map(item => item.layer).sort((a, b) => a - b) ?? [layer]
 
   const [colorBy, setColorBy] = useState<ColorBy>('Module')
   const [geneSearch, setGeneSearch] = useState('')
@@ -95,7 +97,7 @@ export default function LayerExplorer() {
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center">
               Layer
-              <InfoIcon tip="Transformer layer, shown for the 13 usable layers (a non-contiguous subset of the model's 26). Each layer has its own SAE trained independently." />
+              <InfoIcon tip="Available transformer layers are listed from the atlas summary. Each layer has an independently trained SAE." />
             </h3>
             <button
               onClick={() => setShowSidebar(s => !s)}
@@ -105,7 +107,7 @@ export default function LayerExplorer() {
             </button>
           </div>
           <div className="flex gap-1 overflow-x-auto pb-1">
-            {LAYERS.map(l => (
+            {layers.map(l => (
               <button
                 key={l}
                 onClick={() => { setSelectedIdx(null); navigate(`/layer/${l}`) }}
@@ -136,7 +138,7 @@ export default function LayerExplorer() {
           {showSidebar && layerStats && (
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div className="text-center"><span className="text-gray-200">{fmtK(layerStats.alive)}</span><div className="text-gray-500">Alive</div></div>
-              <div className="text-center"><span className="text-gray-200">{fmtPct(layerStats.annotation_rate)}</span><div className="text-gray-500">Ann. Rate</div></div>
+              <div className="text-center"><span className="text-gray-200">{fmtPct(layerStats.annotation_rate)}</span><div className="text-gray-500">{layerStats.annotation_rate_alive != null ? 'Ann. / all features' : 'Ann. Rate'}</div></div>
               <div className="text-center"><span className="text-gray-200">{layerStats.n_modules}</span><div className="text-gray-500">Modules</div></div>
             </div>
           )}
@@ -216,10 +218,10 @@ export default function LayerExplorer() {
         <div className="p-3 border-b border-gray-800">
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center">
             Layer
-            <InfoIcon tip="Transformer layer, shown for the 13 usable layers (a non-contiguous subset of the model's 26). Each layer has its own SAE trained independently." />
+            <InfoIcon tip="Available transformer layers are listed from the atlas summary. Each layer has an independently trained SAE." />
           </h3>
           <div className="flex flex-wrap gap-1">
-            {LAYERS.map(l => (
+            {layers.map(l => (
               <button
                 key={l}
                 onClick={() => {
@@ -245,15 +247,23 @@ export default function LayerExplorer() {
             <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
               <span className="text-gray-500 flex items-center">Alive<InfoIcon tip="Features that fire at least once. Dead features (never active) are excluded." /></span>
               <span className="text-gray-200 text-right">{fmtK(layerStats.alive)}</span>
-              <span className="text-gray-500 flex items-center">Dead<InfoIcon tip="Features that never activate on test data — they occupy dictionary capacity but encode nothing." /></span>
+              <span className="text-gray-500 flex items-center">Dead<InfoIcon tip="Features that never activate across the atlas positions. Inactivity on held-out positions is a separate measure." /></span>
               <span className="text-gray-200 text-right">{fmtK(layerStats.dead)}</span>
-              <span className="text-gray-500 flex items-center">Annotated<InfoIcon tip="Features with at least one significant ontology enrichment (p < 0.05 after correction)." /></span>
+              {layerStats.heldout_dead_features != null && <>
+                <span className="text-gray-500">Held-out inactive</span>
+                <span className="text-gray-200 text-right">{fmtK(layerStats.heldout_dead_features)}</span>
+              </>}
+              <span className="text-gray-500 flex items-center">Annotated<InfoIcon tip="Features with at least one ontology or regulon term passing the 5% false-discovery threshold." /></span>
               <span className="text-gray-200 text-right">{fmtK(layerStats.annotated)}</span>
-              <span className="text-gray-500 flex items-center">Ann. Rate<InfoIcon tip="Fraction of alive features that have at least one significant biological annotation." /></span>
+              <span className="text-gray-500 flex items-center">Ann. Rate<InfoIcon tip={`Fraction of ${layerStats.annotation_rate_alive != null ? 'all dictionary features' : 'atlas-active features'} with at least one ontology or regulon annotation.`} /></span>
               <span className="text-gray-200 text-right">{fmtPct(layerStats.annotation_rate)}</span>
+              {layerStats.network_evidence != null && <>
+                <span className="text-gray-500">Network evidence</span>
+                <span className="text-gray-200 text-right">{fmtK(layerStats.network_evidence)}</span>
+              </>}
               <span className="text-gray-500 flex items-center">Modules<InfoIcon tip="Number of co-activation modules discovered by Leiden clustering at this layer." /></span>
               <span className="text-gray-200 text-right">{layerStats.n_modules}</span>
-              <span className="text-gray-500 flex items-center">SVD Aligned<InfoIcon tip="Features whose direction aligns with a top PCA/SVD component (cosine > 0.5). Most features are novel." /></span>
+              <span className="text-gray-500 flex items-center">SVD Aligned<InfoIcon tip="Features whose decoder direction has absolute cosine greater than 0.7 with one of the leading 50 SVD directions." /></span>
               <span className="text-gray-200 text-right">{fmtK(layerStats.n_svd_aligned)}</span>
             </div>
           </div>
@@ -429,16 +439,16 @@ function FeatureDetailPanel({ feature, layer }: { feature: FeatureCompact; layer
         {f.lb ? (
           <p className="text-sm text-blue-300 mt-0.5">{f.lb}</p>
         ) : (
-          <p className="text-sm text-gray-500 italic mt-0.5">Unannotated</p>
+          <p className="text-sm text-gray-500 italic mt-0.5">No ontology / regulon term</p>
         )}
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <div className="text-gray-500 flex items-center">Activation Freq<InfoIcon tip="Fraction of input cells where this feature fires (activation > 0). Low frequency = highly selective." /></div>
+        <div className="text-gray-500 flex items-center">Activation Freq<InfoIcon tip="Fraction of gene-token positions where this feature has positive activation." /></div>
         <div className="text-gray-200 text-right font-mono">{f.f.toFixed(4)}</div>
 
-        <div className="text-gray-500 flex items-center">Fire Count<InfoIcon tip="Absolute number of gene-token positions (out of 614,400) where this feature activated." /></div>
+        <div className="text-gray-500 flex items-center">Fire Count<InfoIcon tip="Number of gene-token positions where this feature has positive activation." /></div>
         <div className="text-gray-200 text-right font-mono">{fmtK(f.fc)}</div>
 
         <div className="text-gray-500">Module</div>
@@ -456,15 +466,19 @@ function FeatureDetailPanel({ feature, layer }: { feature: FeatureCompact; layer
           )}
         </div>
 
-        <div className="text-gray-500">Annotations</div>
+        <div className="text-gray-500">Ontology / regulon terms</div>
         <div className="text-gray-200 text-right font-mono">{f.na}</div>
+        {f.ne != null && <>
+          <div className="text-gray-500">Network tests</div>
+          <div className="text-gray-200 text-right font-mono">{f.ne}</div>
+        </>}
 
-        <div className="text-gray-500 flex items-center">SVD Aligned<InfoIcon tip="Whether this feature's direction overlaps with a top PCA component. 'Novel' means the SAE found a direction PCA misses." /></div>
+        <div className="text-gray-500 flex items-center">SVD Aligned<InfoIcon tip="Whether this decoder direction exceeds the absolute-cosine threshold against the leading SVD directions. Lack of alignment does not establish a distinct biological concept." /></div>
         <div className="text-right">
           {f.sv ? (
             <span className="text-amber-400">Yes</span>
           ) : (
-            <span className="text-blue-400">No (Novel)</span>
+            <span className="text-blue-400">No</span>
           )}
         </div>
 

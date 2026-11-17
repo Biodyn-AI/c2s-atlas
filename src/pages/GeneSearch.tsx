@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import Plot from 'react-plotly.js'
-import { useGeneIndex } from '../hooks/useData'
+import { useGeneIndex, useGeneIndexCounts, useGlobalSummary } from '../hooks/useData'
 import { moduleColor } from '../lib/colors'
 import { InfoIcon } from '../components/Tooltip'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -26,6 +26,8 @@ const PLOTLY_LAYOUT_BASE: any = {
 
 export default function GeneSearch() {
   const { data, loading, error } = useGeneIndex()
+  const { data: summary } = useGlobalSummary()
+  const { data: counts, error: countError } = useGeneIndexCounts()
   const [query, setQuery] = useState('')
   const [selectedGene, setSelectedGene] = useState<string | null>(null)
   const isMobile = useIsMobile()
@@ -48,8 +50,9 @@ export default function GeneSearch() {
     if (!selectedGene || !data || !data[selectedGene]) return null
     const entries = data[selectedGene].slice().sort((a, b) => a.l - b.l || a.r - b.r)
     const layers = new Set(entries.map(e => e.l))
-    return { entries, nLayers: layers.size }
-  }, [selectedGene, data])
+    const complete = counts?.[selectedGene]
+    return { entries, nLayers: layers.size, complete }
+  }, [selectedGene, data, counts])
 
   if (loading) {
     return (
@@ -59,11 +62,11 @@ export default function GeneSearch() {
     )
   }
 
-  if (error) {
+  if (error || countError) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-red-400 bg-red-900/20 border border-red-800 rounded-lg px-6 py-4">
-          Failed to load gene index: {error}
+          Failed to load gene index data: {error ?? countError}
         </div>
       </div>
     )
@@ -77,7 +80,7 @@ export default function GeneSearch() {
       <div className="flex flex-col items-center space-y-4">
         <h1 className="text-3xl font-bold text-white tracking-tight flex items-center justify-center gap-2">
           Gene Search
-          <InfoIcon tip="Search for any gene to see which SAE features it appears in across all layers." position="bottom" />
+          <InfoIcon tip="Search the limited index of leading driving genes per feature. Complete per-feature gene lists are available on feature pages." position="bottom" />
         </h1>
         <div className="w-full max-w-xl relative">
           <input
@@ -110,6 +113,11 @@ export default function GeneSearch() {
             </ul>
           )}
         </div>
+        <p className="max-w-3xl text-sm text-gray-400 text-center">
+          The index covers {summary?.gene_index_top_genes_per_feature != null ? `only the top ${summary.gene_index_top_genes_per_feature} driving genes` : 'selected leading driving genes'} per feature.
+          {summary?.gene_index_per_gene_cap != null ? ` At most ${summary.gene_index_per_gene_cap} matches per gene are listed.` : ' Per-gene results may be capped.'}
+          {' '}A missing match does not rule out membership in the full gene list on a feature page.
+        </p>
       </div>
 
       {/* Results */}
@@ -117,11 +125,16 @@ export default function GeneSearch() {
         <div className="space-y-6">
           {/* Summary */}
           <p className="text-gray-400 text-center">
-            <span className="text-white font-semibold">{selectedGene}</span> found in{' '}
+            <span className="text-white font-semibold">{selectedGene}</span> shown in{' '}
             <span className="text-blue-400 font-semibold">{results.entries.length}</span>{' '}
             feature{results.entries.length !== 1 ? 's' : ''} across{' '}
             <span className="text-blue-400 font-semibold">{results.nLayers}</span>{' '}
             layer{results.nLayers !== 1 ? 's' : ''}
+            {results.complete && <>; complete counts within the leading-gene index are{' '}
+              <span className="text-blue-400 font-semibold">{results.complete.total}</span> features across{' '}
+              <span className="text-blue-400 font-semibold">{Object.keys(results.complete.by_layer).length}</span> layers.
+              {results.complete.total > results.entries.length && <> The match list is capped.</>}
+            </>}
           </p>
 
           {/* Scatter: layer vs rank */}
@@ -148,14 +161,14 @@ export default function GeneSearch() {
                 ...PLOTLY_LAYOUT_BASE,
                 height: isMobile ? 260 : 340,
                 title: {
-                  text: `${selectedGene} across layers`,
+                  text: `${selectedGene}: displayed index matches`,
                   font: { color: '#e5e7eb', size: 14 },
                 },
                 xaxis: {
                   ...PLOTLY_LAYOUT_BASE.xaxis,
                   title: { text: 'Layer', standoff: 10 },
                   dtick: 1,
-                  range: [-0.5, 17.5],
+                  range: summary?.layers.length ? [Math.min(...summary.layers.map(layer => layer.layer)) - 0.5, Math.max(...summary.layers.map(layer => layer.layer)) + 0.5] : undefined,
                 },
                 yaxis: {
                   ...PLOTLY_LAYOUT_BASE.yaxis,

@@ -30,30 +30,30 @@ const KEY_FINDINGS = [
   {
     title: 'Layer Explorer',
     description: 'Dive into per-layer feature catalogs with activation patterns, gene loadings, and ontology annotations.',
-    to: '/layer/16',
+    to: '/layer',
     accent: 'blue',
     tip: 'Browse all features at each transformer layer, visualized as a UMAP scatter plot.',
   },
   {
     title: 'Biological Modules',
-    description: 'Co-activating feature clusters that map to coherent biological programs across cell types.',
+    description: 'Inspect clusters of co-activating features and their enriched biological terms.',
     to: '/modules',
     accent: 'green',
-    tip: 'Co-activating feature clusters that represent coherent biological programs (e.g., cell cycle, immune signaling).',
+    tip: 'Groups of co-activating features. Inspect their associated genes and significant terms to assess biological interpretation.',
   },
   {
     title: 'Cross-Layer Information Flow',
-    description: 'Track how biological representations transform and persist across the residual stream of the 13-layer subset.',
+    description: 'Inspect decoder-direction matches and ablation effects across the available layers.',
     to: '/flow',
     accent: 'purple',
     tip: 'How features transform across layers \u2014 which early-layer features have analogs in later layers.',
   },
   {
     title: 'SVD vs SAE Comparison',
-    description: 'Nearly all SAE features are novel directions invisible to PCA, capturing fine-grained biology.',
+    description: 'Compare SAE reconstruction and decoder alignment with the leading SVD directions.',
     to: '/comparisons',
     accent: 'orange',
-    tip: 'Comparison with PCA/SVD baseline. Most SAE features capture novel directions invisible to linear decomposition.',
+    tip: 'Compare reconstruction quality and alignment with the leading SVD directions.',
   },
 ] as const
 
@@ -97,6 +97,59 @@ export default function Overview() {
 
   const layers = data.layers.slice().sort((a, b) => a.layer - b.layer)
   const layerNumbers = layers.map(l => l.layer)
+  const separateEvidence = data.total_annotated_any != null
+  const allFeatureRates = data.annotation_rate_denominator === 'all_dictionary_features'
+  const ontologySources = separateEvidence ? ['GO_BP', 'KEGG', 'Reactome', 'TRRUST'] : HEATMAP_ONTOLOGIES
+  const rateTraces: Array<Record<string, unknown>> = [{
+    x: layerNumbers,
+    y: layers.map(layer => layer.annotation_rate * 100),
+    type: 'scatter', mode: 'lines+markers',
+    name: separateEvidence ? 'Ontology / regulon' : 'Bundled annotations',
+    marker: { color: layerNumbers.map(layer => layerColor(layer)), size: 8 },
+    line: { color: '#60a5fa', width: 2 },
+    hovertemplate: 'Layer %{x}<br>%{y:.1f}%<extra>%{fullData.name}</extra>',
+  }]
+  if (separateEvidence) {
+    rateTraces.push({
+      x: layerNumbers, y: layers.map(layer => layer.annotation_rate_any == null ? null : layer.annotation_rate_any * 100),
+      type: 'scatter', mode: 'lines+markers', name: 'Any biological evidence',
+      line: { color: '#c084fc', width: 2 },
+    })
+    // Only draw each measured null against its matching evidence family.
+    for (const [kind, name, color] of [
+      ['uniform', 'Ontology / regulon: uniform-gene floor', '#64748b'],
+      ['freq', 'Ontology / regulon: frequency-matched floor', '#38bdf8'],
+    ]) {
+      if (layers.some(layer => layer.annotation_floors_ontology?.[kind] != null)) {
+        rateTraces.push({
+          x: layerNumbers,
+          y: layers.map(layer => {
+            const floor = layer.annotation_floors_ontology?.[kind]
+            return floor ? floor.mean * 100 : null
+          }),
+          type: 'scatter', mode: 'lines', name,
+          line: { color, width: 2, dash: 'dot' }, connectgaps: false,
+        })
+      }
+    }
+    for (const [kind, name, color] of [
+      ['uniform', 'Any evidence: uniform-gene floor', '#9ca3af'],
+      ['freq', 'Any evidence: frequency-matched floor', '#fbbf24'],
+    ]) {
+      if (layers.some(layer => layer.annotation_floors_any?.[kind] != null)) {
+        rateTraces.push({
+          x: layerNumbers,
+          y: layers.map(layer => {
+            const floor = layer.annotation_floors_any?.[kind]
+            return floor ? floor.mean * 100 : null
+          }),
+          type: 'scatter', mode: 'lines', name,
+          line: { color, width: 2, dash: 'dash' },
+          connectgaps: false,
+        })
+      }
+    }
+  }
 
   // Variance explained range
   const veValues = layers.map(l => l.variance_explained).filter((v): v is number => v != null)
@@ -111,27 +164,27 @@ export default function Overview() {
           C2S-Scale-2B Feature Atlas
         </h1>
         <p className="text-lg text-gray-400 max-w-3xl mx-auto leading-relaxed">
-          Sparse-autoencoder features across a 13-layer subset of C2S-Scale-Gemma-2-2B,
+          Sparse-autoencoder features across {data.n_layers} layers of C2S-Scale-Gemma-2-2B,
           a Cell2Sentence Gemma-2 language model that reads each cell as a rank-ordered sentence of gene names
         </p>
       </section>
 
       {/* Stat cards */}
       <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatCard label="Total Features" value={fmtK(data.total_features)} tip="Total number of SAE dictionary elements (9,216 per layer x 13 usable layers). Each feature is a learned direction in the model's activation space." />
-        <StatCard label="Alive" value={fmtK(data.total_alive)} tip="Features that activate at least once on test data. Dead features never fire and are excluded from analysis." />
+        <StatCard label="Total Features" value={fmtK(data.total_features)} tip={`Dictionary elements across ${data.n_layers} available layers. Each feature is a learned direction in the model's activation space.`} />
+        <StatCard label="Alive" value={fmtK(data.total_alive)} tip="Features that activate at least once across the atlas gene-token positions. Held-out inactivity is reported separately when available." />
         <StatCard
-          label="Annotated"
+          label={separateEvidence ? 'Ontology / regulon' : 'Annotation records'}
           value={fmtK(data.total_annotated)}
-          sub={fmtPct(data.total_annotated / data.total_alive)}
-          tip="Features with at least one statistically significant ontology enrichment (Fisher's exact test, BH-corrected p < 0.05)."
+          sub={fmtPct(data.total_annotated / (allFeatureRates ? data.total_features : data.total_alive))}
+          tip={`Features with at least one significant ontology or regulon term, as a fraction of ${allFeatureRates ? 'all dictionary features' : 'alive features'}. Network-pair and TF-membership evidence are counted separately.`}
         />
-        <StatCard label="Modules" value={data.total_modules.toString()} tip="Groups of features that co-activate on the same cells, identified by Leiden clustering of the co-activation graph." />
+        <StatCard label="Modules" value={data.total_modules.toString()} tip="Groups of features that co-activate at the same gene-token positions, identified by Leiden clustering of the co-activation graph." />
         <StatCard
           label="Features / Layer"
           value={data.n_features_per_layer.toLocaleString()}
           sub={`${data.n_layers} layers`}
-          tip="Number of dictionary elements per SAE. The 4x expansion ratio (2,304 to 9,216) enables fine-grained decomposition."
+          tip="Number of dictionary elements per SAE, read from the loaded atlas summary."
         />
         <StatCard
           label="Var. Explained"
@@ -140,27 +193,22 @@ export default function Overview() {
         />
       </section>
 
+      {separateEvidence && (
+        <p className="text-sm text-gray-400">
+          {fmtK(data.total_annotated_any ?? 0)} features carry any tested biological evidence;
+          {data.total_network_evidence != null && <> {fmtK(data.total_network_evidence)} carry network-pair or TF-membership evidence.</>}
+          These groups can overlap with ontology/regulon annotations.
+        </p>
+      )}
+
       {/* Annotation rate line chart */}
       <section className="bg-gray-900/50 rounded-xl border border-gray-800 p-6">
         <h2 className="text-lg font-semibold text-gray-200 mb-4 flex items-center">
-          Annotation Rate by Layer
-          <InfoIcon tip="Percentage of alive features with significant ontology enrichment at each layer. The U-shape suggests early and late layers capture the most interpretable biology." />
+          Annotation and Evidence Rates by Layer
+          <InfoIcon tip={`Rates per ${allFeatureRates ? 'all dictionary features' : 'feature that fires on the atlas'}. Ontology/regulon terms and the broader combined evidence family are shown separately when available.`} />
         </h2>
         <Plot
-          data={[
-            {
-              x: layerNumbers,
-              y: layers.map(l => l.annotation_rate * 100),
-              type: 'scatter',
-              mode: 'lines+markers',
-              marker: {
-                color: layerNumbers.map(l => layerColor(l)),
-                size: 8,
-              },
-              line: { color: '#60a5fa', width: 2 },
-              hovertemplate: 'Layer %{x}<br>Annotation rate: %{y:.1f}%<extra></extra>',
-            },
-          ]}
+          data={rateTraces}
           layout={{
             ...PLOTLY_LAYOUT_BASE,
             height: isMobile ? 260 : 340,
@@ -179,16 +227,23 @@ export default function Overview() {
           useResizeHandler
           style={{ width: '100%' }}
         />
+        {separateEvidence && (
+          <p className="mt-3 text-xs text-gray-400">
+            {allFeatureRates ? 'All observed rates and random-gene floors use all dictionary features as the denominator. ' : ''}
+            Dotted floors match ontology/regulon evidence; dashed floors match any biological evidence,
+            including network-pair and TF-membership tests. Each floor is shown only when saved for that evidence family.
+          </p>
+        )}
       </section>
 
       {/* Layer x ontology grouped bar chart */}
       <section className="bg-gray-900/50 rounded-xl border border-gray-800 p-6">
         <h2 className="text-lg font-semibold text-gray-200 mb-4 flex items-center">
           Ontology Coverage by Layer
-          <InfoIcon tip="Number of features enriched in each ontology database per layer. Hover bars for exact counts." />
+          <InfoIcon tip="Features with at least one annotation from each source. A feature may appear in more than one source." />
         </h2>
         <Plot
-          data={HEATMAP_ONTOLOGIES.map(ont => ({
+          data={ontologySources.map(ont => ({
             x: layerNumbers.map(l => `L${l}`),
             y: layers.map(l => {
               if (l.ontology_counts[ont] != null) return l.ontology_counts[ont]
@@ -229,9 +284,31 @@ export default function Overview() {
           style={{ width: '100%' }}
         />
         <p className="mt-2 text-xs text-gray-600 italic">
-          Raw annotation counts per ontology database. Hover for exact values.
+          Features may carry terms from several sources, so these counts need not sum to the number of annotated features.
         </p>
       </section>
+
+      {layers.some(layer => layer.network_counts != null) && (
+        <section className="bg-gray-900/50 rounded-xl border border-gray-800 p-6">
+          <h2 className="text-lg font-semibold text-gray-200 mb-4">Network Evidence by Layer</h2>
+          <Plot
+            data={['STRING', 'TRRUST_pairs', 'TF_membership'].map(source => ({
+              x: layerNumbers.map(layer => `L${layer}`),
+              y: layers.map(layer => layer.network_counts ? layer.network_counts[source] ?? 0 : null),
+              type: 'bar', name: ONTOLOGY_LABELS[source] || source,
+              marker: { color: ONTOLOGY_COLORS[source] || '#f59e0b' },
+            }))}
+            layout={{ ...PLOTLY_LAYOUT_BASE, height: isMobile ? 300 : 350, barmode: 'group',
+              yaxis: { ...PLOTLY_LAYOUT_BASE.yaxis, title: { text: 'Features' } } }}
+            config={{ responsive: true, displayModeBar: false }}
+            className="w-full" useResizeHandler style={{ width: '100%' }}
+          />
+          <p className="mt-3 text-xs text-gray-400">
+            Significant pair-count or factor-membership tests are separate evidence types;
+            two features passing the same network test do not share an ontology term.
+          </p>
+        </section>
+      )}
 
       {/* Key findings */}
       <section className="space-y-4">
@@ -240,7 +317,7 @@ export default function Overview() {
           {KEY_FINDINGS.map(card => (
             <Link
               key={card.to}
-              to={card.to}
+              to={card.to === '/layer' ? `/layer/${layerNumbers[0]}` : card.to}
               className={`block bg-gray-900/50 rounded-xl border border-gray-800 p-5 ring-1 ${ACCENT_RING[card.accent]} transition-all hover:bg-gray-900/80`}
             >
               <h3 className={`font-semibold mb-2 flex items-center ${ACCENT_TEXT[card.accent]}`}>

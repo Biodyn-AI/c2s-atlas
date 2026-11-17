@@ -1,4 +1,9 @@
+import { useGlobalSummary } from '../hooks/useData'
+
 export default function About() {
+  const { data: summary } = useGlobalSummary()
+  const layerCount = summary?.n_layers
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-12 space-y-10">
       <section className="space-y-4">
@@ -10,8 +15,7 @@ export default function About() {
             and foundation models for single-cell genomics. This atlas presents a
             Sparse Autoencoder decomposition of{' '}
             <span className="text-gray-200">C2S-Scale-Gemma-2-2B</span>, a Cell2Sentence
-            Gemma-2 language model, revealing biological features across a 13-layer usable
-            subset of the model's 26 transformer layers.
+            Gemma-2 language model. The current data bundle covers {layerCount ?? 'the available'} transformer layers.
           </p>
           <div className="flex flex-wrap gap-4 pt-2">
             <a
@@ -45,32 +49,28 @@ export default function About() {
         <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-6 space-y-3 text-gray-400 leading-relaxed">
           <p>
             This interactive atlas presents the results of training <strong className="text-gray-200">TopK Sparse Autoencoders</strong>{' '}
-            (d=2,304, 4x expansion to 9,216 features, k=32) on the residual stream activations of{' '}
+            on the residual stream activations of{' '}
             <strong className="text-gray-200">C2S-Scale-Gemma-2-2B</strong> — a Cell2Sentence Gemma-2
             language model in which each cell is a space-separated, rank-ordered "cell sentence" of gene
-            names — across a 13-layer usable subset of the model's 26 transformer layers, using 614,400
-            gene-token activation positions. Each SAE feature is defined at the gene-token unit. The SAE
+            names — across {layerCount ?? 'the available'} transformer layers. Each SAE feature is defined at the gene-token unit. The SAE
             methodology follows Kendiukhov (2026, arXiv:2603.02952); the C2S-Scale model is described in
             bioRxiv 2025.04.14.648850.
           </p>
           <p>
-            Each feature represents a learned direction in the model's activation space that
-            corresponds to a specific biological concept — from individual gene programs to
-            complex pathway interactions. Features are annotated against five ontology databases:
+            Each feature is a learned direction in the model's activation space. Curated gene sets test
+            whether its top-associated genes support a biological interpretation. The reference sources are:
           </p>
           <ul className="list-disc list-inside space-y-1 text-sm">
             <li><span className="text-blue-400">Gene Ontology (GO)</span> — Biological Process terms</li>
             <li><span className="text-green-400">KEGG</span> — Metabolic and signaling pathways</li>
             <li><span className="text-purple-400">Reactome</span> — Curated pathway processes</li>
-            <li><span className="text-orange-400">STRING</span> — Protein-protein interaction network edges</li>
-            <li><span className="text-red-400">TRRUST</span> — Transcription factor regulatory targets</li>
+            <li><span className="text-orange-400">STRING</span> — Protein-interaction pair evidence, shown separately from ontology terms</li>
+            <li><span className="text-red-400">TRRUST</span> — Curated factor-target gene sets, regulatory-pair evidence and factor membership</li>
           </ul>
           <p>
-            Key findings include a U-shaped annotation profile across layers, co-activation
-            modules mapping to coherent biological programs, massive superposition (nearly all
-            features are novel directions invisible to PCA/SVD), and a Phase-8 regulatory-logic
-            test on Replogle K562 CRISPRi data that arrived at a co-expression-not-regulation
-            verdict for the model's gene-token features.
+            The atlas supports inspection of feature genes, biological annotations, co-activation
+            modules, decoder-direction persistence and perturbation responses. Annotation and
+            response patterns are evidence for association; they do not establish regulatory direction.
           </p>
         </div>
       </section>
@@ -114,28 +114,25 @@ export default function About() {
         <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-6 space-y-3 text-gray-400 leading-relaxed">
           <p>
             <strong className="text-gray-200">Activation extraction:</strong> Residual stream
-            activations were extracted at the gene-token unit from the 13 usable layers of
-            C2S-Scale-Gemma-2-2B as it processed cell sentences (rank-ordered gene-name
-            sequences), yielding 614,400 gene-token activation positions. The 13 usable layers
-            are a non-contiguous subset of the model's 26 layers; the remaining layers were
-            excluded because their catalogs or annotations were missing or corrupt.
+            activations are pooled over the subword tokens assigned to each gene in a ranked cell
+            sentence. The layer selectors and summary report the coverage of the loaded data bundle.
           </p>
           <p>
             <strong className="text-gray-200">SAE training:</strong> TopK Sparse Autoencoders
-            with k=32 active features per input were trained independently on each layer.
-            The 4x expansion ratio (2,304 → 9,216 features) captures fine-grained biological
-            representations.
+            with fixed sparsity were trained independently on each layer.
+            {summary?.n_features_per_layer != null && <> The loaded bundle contains {summary.n_features_per_layer.toLocaleString()} dictionary elements per layer.</>}
           </p>
           <p>
             <strong className="text-gray-200">Annotation:</strong> Each feature's top-activating
-            genes were tested for enrichment against GO, KEGG, Reactome, STRING, and TRRUST
-            databases using Fisher's exact test with BH correction (p &lt; 0.05).
+            genes are tested against GO, KEGG, Reactome and TRRUST regulons. BH correction covers all eligible terms and the network/membership tests for each feature,
+            using q &lt; 0.05. STRING and TRRUST pair-count evidence is kept separate from named
+            ontology terms. Separate random-gene floors are shown for ontology/regulon and combined evidence when available.
           </p>
           <p>
-            <strong className="text-gray-200">Regulatory-logic test:</strong> A Phase-8 analysis
-            on Replogle K562 CRISPRi perturbation data tested whether Layer 16 gene-token features
-            encode causal regulatory relationships. The features tracked co-expression structure
-            rather than causal regulation, yielding a co-expression-not-regulation verdict.
+            <strong className="text-gray-200">Perturbation target-set test:</strong> The analysis
+            compares feature activations in knockdown and non-targeting cells. Target-set enrichment
+            asks whether responding features are associated with known targets of the perturbed
+            factor. This unsigned test does not measure the direction of gene regulation.
           </p>
         </div>
       </section>
